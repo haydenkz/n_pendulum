@@ -6,13 +6,14 @@ and performance changes, plus their observed impact.
 ## Current Active Setup
 
 The active config is a fixed 5-link run based on the successful 5-pendulum
-hyperparameters, with a smaller model and stabilized PPO settings.
+hyperparameters, with a smaller model, stabilized PPO settings, and a larger
+B200-oriented sweep batch.
 
 ```ini
 [vec]
-total_agents = 4096
-num_buffers = 2
-num_threads = 16
+total_agents = 8192
+num_buffers = 4
+num_threads = 32
 
 [env]
 num_links = 5
@@ -29,7 +30,7 @@ upright_angle_noise = 0.034932828396558764
 upright_vel_noise = 0.02436711547896266
 
 [policy]
-hidden_size = 144
+hidden_size = 100
 num_layers = 4
 expansion_factor = 1
 
@@ -48,11 +49,11 @@ vf_coef = 0.25
 vf_clip_coef = 1.0
 max_grad_norm = 0.5
 ent_coef = 0.0015
-minibatch_size = 16384
+minibatch_size = 65536
 horizon = 128
 ```
 
-Current model size with `DP_MAX_LINKS = 7`: approximately `257k` params.
+Current model size with `DP_MAX_LINKS = 7`: approximately `125.6k` params.
 
 Active reward is the non-delta shaped reward path from the successful
 5-pendulum work:
@@ -69,6 +70,53 @@ upright link shaping
 The later `delta_height` term is not active.
 
 ## 2026-06-10
+
+### Prepared B200 Sweep Export
+
+Changed the active config for the remote B200 sweep:
+
+```ini
+[vec]
+total_agents = 8192
+num_buffers = 4
+num_threads = 32
+
+[train]
+minibatch_size = 65536
+```
+
+Changed the sweep trial budget:
+
+```ini
+[sweep.train.total_timesteps]
+min = 3e8
+max = 2e9
+```
+
+Added a model architecture sweep:
+
+```ini
+[sweep.policy.hidden_size]
+distribution = uniform_pow2
+min = 64
+max = 256
+scale = auto
+
+[sweep.policy.num_layers]
+distribution = int_uniform
+min = 2
+max = 6
+scale = auto
+```
+
+Impact:
+
+- Larger rollout batch and minibatch should better occupy the B200.
+- Four buffers improve rollout/train overlap when the host has enough vCPUs.
+- Longer candidate runs should distinguish real hold behavior from early shaped
+  reward noise.
+- The first sweep trial still uses the known `100 x 4` default; later trials
+  sweep 64/128/256 width and 2-6 layers.
 
 ### Removed Link-Count Curriculum
 
@@ -131,7 +179,7 @@ Tested several rollout worker splits on an R9 7900X:
 1 buffer / 8 threads: less overlap
 ```
 
-Current setting:
+Current local R9 7900X setting before the B200 export:
 
 ```ini
 num_buffers = 2
@@ -143,6 +191,20 @@ Impact:
 - Gives `2048` agents per buffer.
 - Gives `8` CPU workers per buffer.
 - Best observed env timing was around `75ms`, down from roughly `160ms`.
+
+B200 export setting:
+
+```ini
+total_agents = 8192
+num_buffers = 4
+num_threads = 32
+```
+
+Impact:
+
+- Gives `2048` agents per buffer.
+- Gives `8` CPU workers per buffer.
+- Intended for a larger GPU and enough host CPU to keep it fed.
 
 ### Stabilized PPO After Collapse
 
@@ -194,7 +256,8 @@ Useful tested shapes:
 ```text
 272 x 4: documented successful 5-link model, about 995K dashboard params
 200 x 4: about 491K with DP_MAX_LINKS=7, strong early hold, collapsed from high KL
-144 x 4: about 257K with DP_MAX_LINKS=7, current active test
+144 x 4: about 257K with DP_MAX_LINKS=7
+100 x 4: about 125.6K with DP_MAX_LINKS=7, current active default
 128 x 4: about 204K with DP_MAX_LINKS=7
 128 x 2: about 106K with DP_MAX_LINKS=7
 64 x 12: about 173K before latest config changes, decent but deep/narrow
@@ -346,13 +409,25 @@ downsample = 5
 use_gpu = True
 prune_pareto = True
 early_stop_quantile = 0.3
-sweep_only = total_timesteps,upright_reset_prob,upright_angle_noise,upright_vel_noise,force_mag,learning_rate,ent_coef
+sweep_only = total_timesteps,hidden_size,num_layers,upright_reset_prob,upright_angle_noise,upright_vel_noise,force_mag,learning_rate,ent_coef
 
 [sweep.train.total_timesteps]
 distribution = log_normal
-min = 8e7
-max = 3e8
+min = 3e8
+max = 2e9
 scale = time
+
+[sweep.policy.hidden_size]
+distribution = uniform_pow2
+min = 64
+max = 256
+scale = auto
+
+[sweep.policy.num_layers]
+distribution = int_uniform
+min = 2
+max = 6
+scale = auto
 
 [sweep.env.upright_reset_prob]
 distribution = uniform
