@@ -40,14 +40,14 @@ decoder = DefaultDecoder
 
 [train]
 total_timesteps = 100000000000
-learning_rate = 0.0009
+learning_rate = 0.00065
 gamma = 0.995
 gae_lambda = 0.95
-clip_coef = 0.15
-vf_coef = 0.5
+clip_coef = 0.10
+vf_coef = 0.25
 vf_clip_coef = 1.0
 max_grad_norm = 0.5
-ent_coef = 0.0012
+ent_coef = 0.0015
 minibatch_size = 16384
 horizon = 128
 ```
@@ -173,14 +173,17 @@ x_threshold_termination: 0.062
 Changes:
 
 ```ini
-learning_rate = 0.0009
-clip_coef = 0.15
-ent_coef = 0.0012
+learning_rate = 0.00065
+clip_coef = 0.10
+vf_coef = 0.25
+ent_coef = 0.0015
 ```
 
 Impact:
 
 - Intended to reduce policy drift and clip pressure.
+- Reduces value-head gradient pressure on the shared trunk after value loss
+  spikes.
 - Keeps exploration slightly higher.
 - Leaves the successful 5-link env settings intact.
 
