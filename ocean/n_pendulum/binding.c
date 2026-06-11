@@ -32,7 +32,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->link_mass = kwarg_or(kwargs, "link_mass",
         kwarg_or(kwargs, "link1_mass", 0.1f));
     env->link_length = kwarg_or(kwargs, "link_length",
-        kwarg_or(kwargs, "link1_length", 0.5f));
+        kwarg_or(kwargs, "link1_length", 0.7f));
     env->gravity = kwarg_or(kwargs, "gravity", 9.8f);
     env->force_mag = kwarg_or(kwargs, "force_mag", 10.0f);
     env->dt = kwarg_or(kwargs, "dt", 0.02f);

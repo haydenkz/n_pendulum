@@ -22,7 +22,6 @@
 #define DP_X_THRESHOLD 5.0f
 #define DP_WIDTH 1200
 #define DP_HEIGHT 720
-#define DP_SCALE 90.0f
 #define DP_MAX_DOF (DP_MAX_LINKS + 1)
 #define DP_MAX_REWARD 1.0f
 
@@ -54,7 +53,6 @@ typedef struct NPendulum {
     float prev_height;
     int tick;
     float episode_return;
-    float balance_steps;
     int upright_steps;
     int max_upright_steps;
     int min_episode_steps;
@@ -100,6 +98,11 @@ static inline float clamp01(float x) {
     return fminf(fmaxf(x, 0.0f), 1.0f);
 }
 
+static inline float track_limit(NPendulum* env) {
+    float total_length = env->link_length * (float)env->num_links;
+    return fmaxf(DP_X_THRESHOLD, 2.0f * total_length);
+}
+
 static inline int clamp_num_links(int num_links) {
     if (num_links < 1) return DP_DEFAULT_LINKS;
     if (num_links > DP_MAX_LINKS) return DP_MAX_LINKS;
@@ -107,7 +110,8 @@ static inline int clamp_num_links(int num_links) {
 }
 
 void compute_observations(NPendulum* env) {
-    env->observations[0] = env->x / DP_X_THRESHOLD;
+    float x_limit = track_limit(env);
+    env->observations[0] = env->x / x_limit;
     env->observations[1] = env->x_dot / 5.0f;
     for (int i = 0; i < env->num_links; i++) {
         int off = 2 + DP_OBS_FEATURES_PER_LINK * i;
@@ -143,12 +147,6 @@ static inline float link_height(float theta) {
     return 0.5f * (cosf(theta) + 1.0f);
 }
 
-static inline float right_angle_alignment(float angle) {
-    float target = 0.5f * (float)M_PI;
-    float err = fabsf(fabsf(wrap_pi(angle)) - target);
-    return 1.0f - clamp01(err / target);
-}
-
 void add_log(NPendulum* env, bool x_done, bool timeout) {
     env->log.perf += clamp01(env->prev_height);
     env->log.score += env->episode_return;
@@ -175,7 +173,7 @@ void init(NPendulum* env) {
     if (env->upright_vel_noise < 0.0f) env->upright_vel_noise = 0.0f;
     if (!(env->cart_mass > 0.0f)) env->cart_mass = 1.0f;
     if (!(env->link_mass > 0.0f)) env->link_mass = 0.1f;
-    if (!(env->link_length > 0.0f)) env->link_length = 0.5f;
+    if (!(env->link_length > 0.0f)) env->link_length = 0.7f;
     if (!(env->gravity > 0.0f)) env->gravity = 9.8f;
     if (!(env->force_mag > 0.0f)) env->force_mag = 10.0f;
     if (!(env->dt > 0.0f)) env->dt = 0.02f;
@@ -202,7 +200,6 @@ void c_reset(NPendulum* env) {
     env->episode_max_steps = dp_randi(env,
         env->min_episode_steps, env->max_episode_steps);
     env->episode_return = 0.0f;
-    env->balance_steps = 0.0f;
     env->upright_steps = 0;
     env->max_upright_steps = 0;
     env->prev_height = pendulum_height(env);
@@ -307,79 +304,47 @@ void integrate_physics(NPendulum* env, float force) {
 float upright_reward(NPendulum* env, float force) {
     (void)force;
     int n = env->num_links;
-    float link_weight_sum = 0.5f * (float)(n * (n + 1));
-    float pair_weight_sum = 0.5f * (float)(n * (n - 1));
     float height = 0.0f;
-    float reward_height = 0.0f;
-    float upright_links = 0.0f;
-    float right_angle_links = 0.0f;
-    float slow_above_links = 0.0f;
-    float still_links = 0.0f;
     float tip_x = 0.0f;
-    bool slow_links = true;
+    float avg_abs_vel = 0.0f;
+    float max_abs_vel = 0.0f;
     for (int i = 0; i < n; i++) {
-        float link_weight = (float)(n - i) / link_weight_sum;
         float theta = wrap_pi(env->theta[i]);
         float h = link_height(theta);
         float w = fabsf(env->theta_dot[i]);
-        float above_cart = clamp01(2.0f * (h - 0.5f));
-        float slow_above = 1.0f - clamp01(w / 6.0f);
         height += h;
-        reward_height += link_weight * h;
-        upright_links += link_weight * (h > 0.9f ? 1.0f : 0.0f);
-        slow_above_links += link_weight * above_cart * slow_above;
-        still_links += link_weight * (1.0f - clamp01(w / 8.0f));
+        avg_abs_vel += w;
+        max_abs_vel = fmaxf(max_abs_vel, w);
         tip_x += env->link_length * sinf(theta);
-        if (i > 0) {
-            float pair_weight = (float)(n - i) / pair_weight_sum;
-            right_angle_links += pair_weight
-                * right_angle_alignment(env->theta[i] - env->theta[i - 1]);
-        }
-        slow_links = slow_links && w < 1.5f;
     }
     height /= (float)n;
-    right_angle_links *= 1.0f - reward_height;
+    avg_abs_vel /= (float)n;
 
-    float cart_center = 1.0f - clamp01(fabsf(env->x) / DP_X_THRESHOLD);
-    float pre_stable = clamp01((reward_height - 0.55f) / 0.35f);
-    float balance_quality = clamp01((reward_height - 0.8f) / 0.2f) * still_links * cart_center;
-    float total_length = env->link_length * (float)env->num_links;
-    float tip_center = 1.0f - clamp01(fabsf(tip_x) / fmaxf(0.45f * total_length, 0.001f));
-    if (balance_quality > 0.35f) {
-        env->balance_steps += balance_quality;
-    } else {
-        env->balance_steps = 0.0f;
-    }
+    float x_limit = track_limit(env);
+    float total_length = env->link_length * (float)n;
+    float height_delta = height - env->prev_height;
+    float delta_reward = fminf(fmaxf(height_delta, -1.0f), 1.0f);
+    float cart_center = 1.0f - clamp01(fabsf(env->x) / x_limit);
+    float tip_center = 1.0f - clamp01(fabsf(tip_x) / fmaxf(0.5f * total_length, 0.001f));
+    float slow = 1.0f - clamp01(avg_abs_vel / 6.0f);
+    float balance_quality = height * slow * cart_center * tip_center;
 
-    bool stable = height > 0.9f && slow_links && fabsf(env->x_dot) < 1.0f;
+    bool stable = height > 0.9f
+        && max_abs_vel < 1.5f
+        && fabsf(env->x_dot) < 1.0f
+        && cart_center > 0.5f
+        && tip_center > 0.5f;
     if (stable) env->upright_steps += 1;
     else env->upright_steps = 0;
     if (env->upright_steps > env->max_upright_steps) {
         env->max_upright_steps = env->upright_steps;
     }
 
-    float almost_stable_bonus = 0.08f * pre_stable * still_links * cart_center;
-    float balance_bonus = 0.18f * balance_quality;
-    float tip_bonus = 0.08f * balance_quality * tip_center;
-    float swing_gate = 1.0f - reward_height;
-    float balance_progress = clamp01(env->balance_steps / 200.0f);
-    float balance_hold_bonus = 0.35f * balance_quality * balance_progress;
-    float stable_bonus = stable ? 0.25f : 0.0f;
-    float hold_progress = clamp01((float)env->upright_steps / 300.0f);
-    float hold_bonus = stable
-        ? 0.75f * hold_progress
-        : 0.0f;
-    float reward = 0.03f * upright_links
-        + 0.05f * right_angle_links * swing_gate
-        + 0.06f * slow_above_links
-        + 0.02f * still_links * reward_height
-        + 0.02f * reward_height * cart_center
-        + almost_stable_bonus
-        + balance_bonus
-        + tip_bonus
-        + balance_hold_bonus
-        + stable_bonus
-        + hold_bonus;
+    float hold_progress = clamp01((float)env->upright_steps / 100.0f);
+    float reward = delta_reward
+        + 0.02f * height * cart_center
+        + 0.03f * balance_quality
+        + (stable ? 0.05f + 0.15f * hold_progress : 0.0f);
     env->prev_height = height;
     return fminf(fmaxf(reward, -DP_MAX_REWARD), DP_MAX_REWARD);
 }
@@ -405,7 +370,8 @@ void c_step(NPendulum* env) {
     env->tick += 1;
 
     bool invalid = invalid_state(env);
-    bool x_done = env->x < -DP_X_THRESHOLD || env->x > DP_X_THRESHOLD;
+    float x_limit = track_limit(env);
+    bool x_done = env->x < -x_limit || env->x > x_limit;
     bool timeout = env->tick >= env->episode_max_steps;
     bool done = invalid || x_done || timeout;
     env->rewards[0] = upright_reward(env, force);
@@ -433,22 +399,25 @@ void c_render(NPendulum* env) {
     if (invalid_state(env)) return;
 
     float rail_y = DP_HEIGHT * 0.50f;
-    float cart_x = DP_WIDTH / 2.0f + env->x * DP_SCALE;
+    float total_length = env->link_length * (float)env->num_links;
+    float x_limit = track_limit(env);
+    float pixels_per_meter = (DP_WIDTH - 80.0f) / (2.0f * x_limit);
+    float max_chain_pixels = fminf(rail_y, DP_HEIGHT - rail_y) - 24.0f;
+    pixels_per_meter = fminf(pixels_per_meter,
+        max_chain_pixels / fmaxf(total_length, 0.001f));
+
+    float cart_x = DP_WIDTH / 2.0f + env->x * pixels_per_meter;
     cart_x = fminf(fmaxf(cart_x, 32.0f), DP_WIDTH - 32.0f);
     float cart_y = rail_y - 16.0f;
-    float total_length = env->link_length * (float)env->num_links;
-    float pixels_per_meter = DP_SCALE;
-    float max_chain_pixels = fminf(rail_y, DP_HEIGHT - rail_y) - 16.0f;
-    if (total_length * pixels_per_meter > max_chain_pixels) {
-        pixels_per_meter = max_chain_pixels / fmaxf(total_length, 0.001f);
-    }
     float link_pixels = env->link_length * pixels_per_meter;
     Vector2 prev = {cart_x, cart_y};
     Color colors[] = {PUFF_RED, PUFF_YELLOW, PUFF_CYAN};
 
     BeginDrawing();
     ClearBackground(PUFF_BACKGROUND);
-    DrawLine(0, (int)rail_y, DP_WIDTH, (int)rail_y, PUFF_CYAN);
+    int rail_min = (int)(DP_WIDTH / 2.0f - x_limit * pixels_per_meter);
+    int rail_max = (int)(DP_WIDTH / 2.0f + x_limit * pixels_per_meter);
+    DrawLine(rail_min, (int)rail_y, rail_max, (int)rail_y, PUFF_CYAN);
     DrawRectangle((int)(cart_x - 28), (int)(cart_y - 12), 56, 24, PUFF_CYAN);
     DrawCircleV(prev, 8.0f, PUFF_WHITE);
     for (int i = 0; i < env->num_links; i++) {

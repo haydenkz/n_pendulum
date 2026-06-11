@@ -5,9 +5,9 @@ and performance changes, plus their observed impact.
 
 ## Current Active Setup
 
-The active config is a fixed 7-link run based on the successful 5-pendulum
-hyperparameters, with a smaller model, stabilized PPO settings, and a larger
-RTX 5090-oriented sweep batch.
+The active config is a local RTX 4070 fixed 6-link run based on the successful
+5-pendulum hyperparameters, with a smaller model, stabilized PPO settings,
+longer links, and the simplified delta-height reward.
 
 ```ini
 [vec]
@@ -16,10 +16,10 @@ num_buffers = 2
 num_threads = 16
 
 [env]
-num_links = 7
+num_links = 6
 cart_mass = 1.0
 link_mass = 0.1
-link_length = 0.5
+link_length = 0.7
 gravity = 9.8
 force_mag = 8.622977087274194
 dt = 0.02
@@ -49,27 +49,147 @@ vf_coef = 0.25
 vf_clip_coef = 1.0
 max_grad_norm = 0.5
 ent_coef = 0.0015
-minibatch_size = 32768
+minibatch_size = 16384
 horizon = 128
 ```
 
 Current model size with `DP_MAX_LINKS = 7`: approximately `125.6k` params.
 
-Active reward is the non-delta shaped reward path from the successful
-5-pendulum work:
+Active reward is the simplified delta-height reward path:
 
 ```text
-upright link shaping
-+ gated right-angle swing-up shaping
-+ slow-above/stillness shaping
-+ cart centering
-+ tip centering
-+ balance and hold bonuses
+normalized height_delta
++ small height/cart-center term
++ small balance-quality term
++ stable upright hold bonus
 ```
 
-The later `delta_height` term is not active.
+The old right-angle, per-link upright, slow-above, and large hold-ramp shaping
+terms are no longer active.
 
 ## 2026-06-10
+
+### Set Up Local 6-Pendulum Run
+
+Changed the active local run target:
+
+```ini
+[env]
+num_links = 6
+link_length = 0.7
+```
+
+Impact:
+
+- Keeps the local 4070 throughput profile while testing the next link count.
+- Uses the new chain-length-scaled track and render zoom.
+- Uses the simplified delta-height reward instead of the successful 5-link
+  shaped reward.
+
+### Simplified Toward Delta-Height Reward
+
+Replaced the older multi-term shaped reward with a compact reward centered on
+normalized height change:
+
+```text
+height_delta = current_normalized_height - previous_normalized_height
+reward = height_delta
+       + 0.02 * height * cart_center
+       + 0.03 * balance_quality
+       + stable_hold_bonus
+```
+
+The height term is normalized by total chain length, so the delta remains in
+`[-1, 1]` regardless of link count.
+
+Also changed the physical/visual scaling:
+
+```ini
+link_length = 0.7
+```
+
+```text
+track_limit = max(5.0, 2.0 * total_chain_length)
+render scale fits both track width and total chain length
+```
+
+Impact:
+
+- Moves the swing-up signal toward the PufferLib creator's recommended
+  height-delta reward.
+- Longer links should make high-link-count dynamics less twitchy.
+- Track width and rendering now scale with chain length instead of assuming one
+  fixed visual/termination size.
+- Reward code is much shorter and should scale more cleanly with `num_links`.
+
+### Synced First VPS 7-Link Sweep Logs
+
+Pulled the first completed VPS sweep logs into:
+
+```text
+vps_sweep/logs/n_pendulum/
+```
+
+Completed files:
+
+```text
+1781138204018.json
+1781138494152.json
+1781138784210.json
+```
+
+Best completed result so far:
+
+```text
+num_links: 7
+hidden_size: 100
+num_layers: 4
+steps: 1.50B
+score: 160.264
+hold_time: 2.601
+```
+
+Impact:
+
+- The early 7-link VPS sweep has not found a strong candidate yet.
+- The two best completed logs are duplicate default trials.
+- Current evidence favors continuing reward/physics simplification before
+  trusting the 7-link sweep results.
+
+### Restored Local RTX 4070 Profile
+
+Restored the local working config after exporting the VPS sweep:
+
+```ini
+[vec]
+total_agents = 4096
+num_buffers = 2
+num_threads = 16
+
+[env]
+num_links = 5
+
+[train]
+minibatch_size = 16384
+```
+
+Restored the local short sweep budget and removed the model architecture sweep
+from the local config:
+
+```ini
+[sweep]
+sweep_only = total_timesteps,link_length,upright_reset_prob,upright_angle_noise,upright_vel_noise,force_mag,learning_rate,ent_coef
+
+[sweep.train.total_timesteps]
+min = 8e7
+max = 3e8
+```
+
+Impact:
+
+- Local runs are back to the faster 4070/R9 7900X profile.
+- The pushed VPS repo remains configured for the RTX 5090 7-link sweep.
+- The default local model stays at `100 x 4`.
 
 ### Retargeted VPS Sweep to RTX 5090 and 7 Links
 
@@ -274,11 +394,12 @@ Impact:
 
 - Wider 4-layer MinGRU shapes look more promising than very deep narrow shapes.
 - `200 x 4` learned quickly but needed PPO stabilization.
-- `144 x 4` is the current compromise between speed and capacity.
+- `100 x 4` is the current local default.
 
-### Hybrid Delta Reward Test
+### Earlier Hybrid Delta Reward Test
 
-Pure delta-height reward performed weakly. We switched back to a hybrid reward:
+An earlier pure delta-height test performed weakly. We then tried a hybrid
+reward:
 
 ```text
 weighted height delta
@@ -307,8 +428,8 @@ Impact:
 
 - Hybrid reward beat pure delta reward in short 5-link sweeps.
 - Pure delta reward gave very low score scale and weak progress.
-- This is no longer active. The current reward removes the `delta_height` term
-  and uses the non-delta shaped reward path.
+- This exact hybrid is no longer active. The current reward keeps the
+  height-delta idea but removes the older right-angle and per-link shaping.
 
 ## Successful 5-Pendulum Run
 
@@ -415,30 +536,24 @@ downsample = 5
 use_gpu = True
 prune_pareto = True
 early_stop_quantile = 0.3
-sweep_only = total_timesteps,hidden_size,num_layers,upright_reset_prob,upright_angle_noise,upright_vel_noise,force_mag,learning_rate,ent_coef
+sweep_only = total_timesteps,link_length,upright_reset_prob,upright_angle_noise,upright_vel_noise,force_mag,learning_rate,ent_coef
 
 [sweep.train.total_timesteps]
 distribution = log_normal
-min = 5e8
-max = 3e9
+min = 8e7
+max = 3e8
 scale = time
-
-[sweep.policy.hidden_size]
-distribution = uniform_pow2
-min = 64
-max = 256
-scale = auto
-
-[sweep.policy.num_layers]
-distribution = int_uniform
-min = 2
-max = 6
-scale = auto
 
 [sweep.env.upright_reset_prob]
 distribution = uniform
 min = 0.0
 max = 0.5
+scale = auto
+
+[sweep.env.link_length]
+distribution = uniform
+min = 0.6
+max = 0.9
 scale = auto
 
 [sweep.env.upright_angle_noise]

@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
         .upright_vel_noise = 0.2f,
         .cart_mass = 1.0f,
         .link_mass = 0.1f,
-        .link_length = 0.5f,
+        .link_length = 0.7f,
         .gravity = 9.8f,
         .force_mag = 10.0f,
         .dt = 0.02f,
@@ -32,13 +32,14 @@ int main(int argc, char** argv) {
     c_reset(&env);
     c_render(&env);
     while (!WindowShouldClose()) {
+        int center_action = (DP_ACTIONS - 1) / 2;
         if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
             if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) actions[0] = 0;
-            else if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) actions[0] = 6;
-            else actions[0] = 3;
-        } else if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) actions[0] = 2;
-        else if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) actions[0] = 4;
-        else actions[0] = 3;
+            else if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) actions[0] = DP_ACTIONS - 1;
+            else actions[0] = center_action;
+        } else if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) actions[0] = center_action - 2;
+        else if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) actions[0] = center_action + 2;
+        else actions[0] = center_action;
         c_step(&env);
         c_render(&env);
     }
