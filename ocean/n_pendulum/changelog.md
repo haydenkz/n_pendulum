@@ -69,6 +69,22 @@ terms are no longer active.
 
 ## 2026-06-10
 
+### Added Finer 13-Bin Control
+
+Changed the discrete action space:
+
+```c
+#define DP_ACTIONS 13
+```
+
+Impact:
+
+- Keeps a centered zero-force action.
+- Adds one extra force bin on each side compared with the previous 11-action
+  setup.
+- Force spacing is finer for the 6-link run.
+- Old 11-action checkpoints are not compatible with the new policy head.
+
 ### Set Up Local 6-Pendulum Run
 
 Changed the active local run target:
