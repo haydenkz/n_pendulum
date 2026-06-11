@@ -5,18 +5,18 @@ and performance changes, plus their observed impact.
 
 ## Current Active Setup
 
-The active config is a fixed 5-link run based on the successful 5-pendulum
+The active config is a fixed 7-link run based on the successful 5-pendulum
 hyperparameters, with a smaller model, stabilized PPO settings, and a larger
-B200-oriented sweep batch.
+RTX 5090-oriented sweep batch.
 
 ```ini
 [vec]
-total_agents = 8192
-num_buffers = 4
-num_threads = 32
+total_agents = 4096
+num_buffers = 2
+num_threads = 16
 
 [env]
-num_links = 5
+num_links = 7
 cart_mass = 1.0
 link_mass = 0.1
 link_length = 0.5
@@ -49,7 +49,7 @@ vf_coef = 0.25
 vf_clip_coef = 1.0
 max_grad_norm = 0.5
 ent_coef = 0.0015
-minibatch_size = 65536
+minibatch_size = 32768
 horizon = 128
 ```
 
@@ -71,26 +71,29 @@ The later `delta_height` term is not active.
 
 ## 2026-06-10
 
-### Prepared B200 Sweep Export
+### Retargeted VPS Sweep to RTX 5090 and 7 Links
 
-Changed the active config for the remote B200 sweep:
+Changed the active config for the remote RTX 5090 sweep:
 
 ```ini
 [vec]
-total_agents = 8192
-num_buffers = 4
-num_threads = 32
+total_agents = 4096
+num_buffers = 2
+num_threads = 16
+
+[env]
+num_links = 7
 
 [train]
-minibatch_size = 65536
+minibatch_size = 32768
 ```
 
 Changed the sweep trial budget:
 
 ```ini
 [sweep.train.total_timesteps]
-min = 3e8
-max = 2e9
+min = 5e8
+max = 3e9
 ```
 
 Added a model architecture sweep:
@@ -111,10 +114,13 @@ scale = auto
 
 Impact:
 
-- Larger rollout batch and minibatch should better occupy the B200.
-- Four buffers improve rollout/train overlap when the host has enough vCPUs.
+- Tests the full compile-time cap of 7 active links.
+- Uses a 5090-sized batch instead of the larger B200 profile to avoid making
+  the heavier 7-link CPU env the dominant bottleneck.
+- Larger minibatches reduce optimizer overhead compared with the local 4070
+  config while staying lighter than the B200 export.
 - Longer candidate runs should distinguish real hold behavior from early shaped
-  reward noise.
+  reward noise on the harder 7-link task.
 - The first sweep trial still uses the known `100 x 4` default; later trials
   sweep 64/128/256 width and 2-6 layers.
 
@@ -192,19 +198,19 @@ Impact:
 - Gives `8` CPU workers per buffer.
 - Best observed env timing was around `75ms`, down from roughly `160ms`.
 
-B200 export setting:
+RTX 5090 7-link export setting:
 
 ```ini
-total_agents = 8192
-num_buffers = 4
-num_threads = 32
+total_agents = 4096
+num_buffers = 2
+num_threads = 16
 ```
 
 Impact:
 
 - Gives `2048` agents per buffer.
 - Gives `8` CPU workers per buffer.
-- Intended for a larger GPU and enough host CPU to keep it fed.
+- Intended to keep the heavier 7-link CPU env manageable on a 5090 VPS.
 
 ### Stabilized PPO After Collapse
 
@@ -413,8 +419,8 @@ sweep_only = total_timesteps,hidden_size,num_layers,upright_reset_prob,upright_a
 
 [sweep.train.total_timesteps]
 distribution = log_normal
-min = 3e8
-max = 2e9
+min = 5e8
+max = 3e9
 scale = time
 
 [sweep.policy.hidden_size]
