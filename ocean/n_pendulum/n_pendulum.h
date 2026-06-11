@@ -24,6 +24,7 @@
 #define DP_HEIGHT 720
 #define DP_MAX_DOF (DP_MAX_LINKS + 1)
 #define DP_MAX_REWARD 1.0f
+#define DP_DELTA_SCALE 8.0f
 
 typedef struct Log {
     float perf;
@@ -323,7 +324,7 @@ float upright_reward(NPendulum* env, float force) {
     float x_limit = track_limit(env);
     float total_length = env->link_length * (float)n;
     float height_delta = height - env->prev_height;
-    float delta_reward = fminf(fmaxf(height_delta, -1.0f), 1.0f);
+    float delta_reward = fminf(fmaxf(DP_DELTA_SCALE * height_delta, -1.0f), 1.0f);
     float cart_center = 1.0f - clamp01(fabsf(env->x) / x_limit);
     float tip_center = 1.0f - clamp01(fabsf(tip_x) / fmaxf(0.5f * total_length, 0.001f));
     float slow = 1.0f - clamp01(avg_abs_vel / 6.0f);

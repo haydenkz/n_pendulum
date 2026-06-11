@@ -69,6 +69,34 @@ terms are no longer active.
 
 ## 2026-06-10
 
+### Scaled Delta Signal After Flat 6-Link Run
+
+Observed the first 6-link delta-reward run flatten:
+
+```text
+steps: 510.7M
+hold_time: 3.923
+x_threshold_termination: 0.007
+
+steps: 4.9B
+hold_time: 4.332
+x_threshold_termination: 0.054
+```
+
+Change:
+
+```c
+#define DP_DELTA_SCALE 8.0f
+delta_reward = clamp(DP_DELTA_SCALE * height_delta, -1.0f, 1.0f)
+```
+
+Impact:
+
+- Keeps the creator-recommended height-delta reward as the primary swing-up
+  signal.
+- Makes per-step height changes large enough for PPO to see.
+- Still bounds the per-step delta contribution to `[-1, 1]`.
+
 ### Added Finer 13-Bin Control
 
 Changed the discrete action space:
@@ -109,7 +137,7 @@ normalized height change:
 
 ```text
 height_delta = current_normalized_height - previous_normalized_height
-reward = height_delta
+reward = clamp(8 * height_delta, -1, 1)
        + 0.02 * height * cart_center
        + 0.03 * balance_quality
        + stable_hold_bonus
