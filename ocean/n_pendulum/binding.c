@@ -28,6 +28,12 @@ void my_init(Env* env, Dict* kwargs) {
     env->upright_reset_prob = kwarg_or(kwargs, "upright_reset_prob", 0.0f);
     env->upright_angle_noise = kwarg_or(kwargs, "upright_angle_noise", 0.15f);
     env->upright_vel_noise = kwarg_or(kwargs, "upright_vel_noise", 0.2f);
+    env->delta_scale = kwarg_or(kwargs, "delta_scale", DP_DEFAULT_DELTA_SCALE);
+    env->stable_height = kwarg_or(kwargs, "stable_height", DP_DEFAULT_STABLE_HEIGHT);
+    env->stable_vel = kwarg_or(kwargs, "stable_vel", DP_DEFAULT_STABLE_VEL);
+    env->hold_ramp_steps = kwarg_or(kwargs, "hold_ramp_steps", DP_DEFAULT_HOLD_RAMP_STEPS);
+    env->stable_bonus = kwarg_or(kwargs, "stable_bonus", DP_DEFAULT_STABLE_BONUS);
+    env->hold_bonus = kwarg_or(kwargs, "hold_bonus", DP_DEFAULT_HOLD_BONUS);
     env->cart_mass = kwarg_or(kwargs, "cart_mass", 1.0f);
     env->link_mass = kwarg_or(kwargs, "link_mass",
         kwarg_or(kwargs, "link1_mass", 0.1f));

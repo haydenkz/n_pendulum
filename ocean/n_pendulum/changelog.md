@@ -630,3 +630,77 @@ min = 0.001
 max = 0.0025
 scale = auto
 ```
+
+## 6-Pendulum Overnight Stability Run
+
+Date: 2026-06-11
+
+Goal:
+
+- Preserve the best observed 6-pendulum learning behavior overnight.
+- Reduce collapse risk after the policy discovers swing-up/short hold behavior.
+
+Current config:
+
+```ini
+[env]
+num_links = 6
+link_length = 0.7565952808070149
+force_mag = 8.621807161498612
+upright_reset_prob = 0.464798728682683
+upright_angle_noise = 0.04424879908813739
+upright_vel_noise = 0.020134070896522523
+delta_scale = 4.0
+stable_height = 0.85
+stable_vel = 2.5
+hold_ramp_steps = 200.0
+stable_bonus = 0.08208514437741138
+hold_bonus = 0.17647183303120875
+
+[policy]
+hidden_size = 224
+num_layers = 4
+expansion_factor = 1
+
+[torch]
+network = MinGRU
+encoder = DefaultEncoder
+decoder = DefaultDecoder
+
+[train]
+total_timesteps = 100000000000
+learning_rate = 0.0008
+anneal_lr = 1
+min_lr_ratio = 0
+gamma = 0.995
+gae_lambda = 0.95
+replay_ratio = 1
+clip_coef = 0.10
+vf_coef = 0.25
+vf_clip_coef = 1.0
+max_grad_norm = 0.5
+ent_coef = 0.0010
+beta1 = 0.9
+beta2 = 0.999
+eps = 1e-8
+minibatch_size = 16384
+horizon = 128
+vtrace_rho_clip = 1.0
+vtrace_c_clip = 1.0
+prio_alpha = 0.5
+prio_beta0 = 0.5
+```
+
+Evidence and rationale:
+
+- `224x4` reached the best observed short-run 6-pendulum behavior:
+  `score = 24.520`, `hold_time = 25.155` at `3.1B` steps.
+- The same run later collapsed to `score = 13.211`, `hold_time = 12.695`
+  by `8.7B` steps, so simply training longer at the sweep LR was not stable.
+- `224x3` was faster, but failed the long test: `score = 14.470`,
+  `hold_time = 13.654` at `5.9B` steps.
+- The overnight config keeps the best architecture (`224x4`) but lowers
+  `learning_rate` from `0.0012411956480877164` to `0.0008` and `ent_coef`
+  from `0.001999606080016384` to `0.0010`.
+- The intent is slower policy movement and less forced exploration after the
+  policy discovers a usable controller.

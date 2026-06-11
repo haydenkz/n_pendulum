@@ -24,7 +24,12 @@
 #define DP_HEIGHT 720
 #define DP_MAX_DOF (DP_MAX_LINKS + 1)
 #define DP_MAX_REWARD 1.0f
-#define DP_DELTA_SCALE 8.0f
+#define DP_DEFAULT_DELTA_SCALE 8.0f
+#define DP_DEFAULT_STABLE_HEIGHT 0.9f
+#define DP_DEFAULT_STABLE_VEL 1.5f
+#define DP_DEFAULT_HOLD_RAMP_STEPS 100.0f
+#define DP_DEFAULT_STABLE_BONUS 0.05f
+#define DP_DEFAULT_HOLD_BONUS 0.15f
 
 typedef struct Log {
     float perf;
@@ -62,6 +67,12 @@ typedef struct NPendulum {
     float upright_reset_prob;
     float upright_angle_noise;
     float upright_vel_noise;
+    float delta_scale;
+    float stable_height;
+    float stable_vel;
+    float hold_ramp_steps;
+    float stable_bonus;
+    float hold_bonus;
 
     float cart_mass;
     float link_mass;
@@ -172,6 +183,13 @@ void init(NPendulum* env) {
     env->upright_reset_prob = clamp01(env->upright_reset_prob);
     if (env->upright_angle_noise < 0.0f) env->upright_angle_noise = 0.0f;
     if (env->upright_vel_noise < 0.0f) env->upright_vel_noise = 0.0f;
+    if (!(env->delta_scale > 0.0f)) env->delta_scale = DP_DEFAULT_DELTA_SCALE;
+    env->stable_height = clamp01(env->stable_height);
+    if (env->stable_height <= 0.0f) env->stable_height = DP_DEFAULT_STABLE_HEIGHT;
+    if (!(env->stable_vel > 0.0f)) env->stable_vel = DP_DEFAULT_STABLE_VEL;
+    if (!(env->hold_ramp_steps > 0.0f)) env->hold_ramp_steps = DP_DEFAULT_HOLD_RAMP_STEPS;
+    if (!(env->stable_bonus > 0.0f)) env->stable_bonus = DP_DEFAULT_STABLE_BONUS;
+    if (!(env->hold_bonus > 0.0f)) env->hold_bonus = DP_DEFAULT_HOLD_BONUS;
     if (!(env->cart_mass > 0.0f)) env->cart_mass = 1.0f;
     if (!(env->link_mass > 0.0f)) env->link_mass = 0.1f;
     if (!(env->link_length > 0.0f)) env->link_length = 0.7f;
@@ -324,14 +342,14 @@ float upright_reward(NPendulum* env, float force) {
     float x_limit = track_limit(env);
     float total_length = env->link_length * (float)n;
     float height_delta = height - env->prev_height;
-    float delta_reward = fminf(fmaxf(DP_DELTA_SCALE * height_delta, -1.0f), 1.0f);
+    float delta_reward = fminf(fmaxf(env->delta_scale * height_delta, -1.0f), 1.0f);
     float cart_center = 1.0f - clamp01(fabsf(env->x) / x_limit);
     float tip_center = 1.0f - clamp01(fabsf(tip_x) / fmaxf(0.5f * total_length, 0.001f));
     float slow = 1.0f - clamp01(avg_abs_vel / 6.0f);
     float balance_quality = height * slow * cart_center * tip_center;
 
-    bool stable = height > 0.9f
-        && max_abs_vel < 1.5f
+    bool stable = height > env->stable_height
+        && max_abs_vel < env->stable_vel
         && fabsf(env->x_dot) < 1.0f
         && cart_center > 0.5f
         && tip_center > 0.5f;
@@ -341,11 +359,11 @@ float upright_reward(NPendulum* env, float force) {
         env->max_upright_steps = env->upright_steps;
     }
 
-    float hold_progress = clamp01((float)env->upright_steps / 100.0f);
+    float hold_progress = clamp01((float)env->upright_steps / env->hold_ramp_steps);
     float reward = delta_reward
         + 0.02f * height * cart_center
         + 0.03f * balance_quality
-        + (stable ? 0.05f + 0.15f * hold_progress : 0.0f);
+        + (stable ? env->stable_bonus + env->hold_bonus * hold_progress : 0.0f);
     env->prev_height = height;
     return fminf(fmaxf(reward, -DP_MAX_REWARD), DP_MAX_REWARD);
 }
